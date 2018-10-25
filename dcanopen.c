@@ -199,11 +199,11 @@ typedef struct {
 	uv_timer_t sdo_uvt;
 	unsigned int wait_time;
 	napi_ref pdo_cb_ref;
-} co_t_node2;
+} co_t_node;
 
 //// uvlib callback ////////////////////////////////////////////////////////////
 void co_sdo_timeout_cb(uv_timer_t* handle){
-	co_t_node2 *con = (co_t_node2 *)handle->data;
+	co_t_node *con = (co_t_node *)handle->data;
 	co_t_sdo_queue_item *i;
 	napi_handle_scope nhs;
 	napi_status status;
@@ -228,7 +228,7 @@ void co_sdo_timeout_cb(uv_timer_t* handle){
 	napi_close_handle_scope(con->env, nhs);
 }
 
-void co_sdo_emit(co_t_node2 *con){
+void co_sdo_emit(co_t_node *con){
 	struct can_frame *frame;
 	/* Return directly, if the queue is empty */
 	if(co_sdo_queue_size(&con->sdo_queue) == 0)
@@ -241,7 +241,7 @@ void co_sdo_emit(co_t_node2 *con){
 }
 
 void co_recv_cb(uv_poll_t* handle, int status, int events) {
-	co_t_node2 *con = (co_t_node2 *)handle->data;
+	co_t_node *con = (co_t_node *)handle->data;
 	co_t_sdo_queue_item *i;
 	struct can_frame frame;
 	struct co_s_sdo *s = (struct co_s_sdo *)frame.data;
@@ -295,8 +295,9 @@ void co_recv_cb(uv_poll_t* handle, int status, int events) {
 		
 		napi_close_handle_scope(con->env, nhs);
 	/* PDO 0-3 */
-	}else if(frame.can_id == 0x180+con->node_id || frame.can_id == 0x280+con->node_id ||
-		frame.can_id == 0x380+con->node_id || frame.can_id == 0x480+con->node_id){
+	}else if((frame.can_id == 0x180+con->node_id || frame.can_id == 0x280+con->node_id ||
+		frame.can_id == 0x380+con->node_id || frame.can_id == 0x480+con->node_id) &&
+		con->pdo_cb_ref != NULL){
 
 		napi_open_handle_scope(con->env, &nhs);
 
@@ -328,7 +329,7 @@ napi_value wrapper_co_nmt_send(napi_env env, napi_callback_info info){
 	napi_status status;
 	size_t argc = 1;
 	napi_value argv[1];
-	co_t_node2 *con;
+	co_t_node *con;
 	uint32_t state; /* Use uint32_t and not enum co_e_nmt_state */
 	struct can_frame frame;
 	struct co_s_nmt *d = (struct co_s_nmt *)frame.data;
@@ -362,7 +363,7 @@ napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
 	void *jsdata;
 	size_t jslen;
 	napi_valuetype vt;
-	co_t_node2 *con;
+	co_t_node *con;
 	struct can_frame *frame;
 	struct co_s_sdo *s;
 	co_t_sdo_queue_item *i;
@@ -429,7 +430,7 @@ napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
 	size_t argc = 3;
 	napi_value argv[3];
 	napi_valuetype vt;
-	co_t_node2 *con;
+	co_t_node *con;
 	uint32_t index, subindex;
 	struct can_frame *frame;
 	struct co_s_sdo *s;
@@ -493,7 +494,7 @@ napi_value wrapper_co_pdo_send(napi_env env, napi_callback_info info) {
 	uint32_t pdoid;
 	size_t jslen;
 	void *jsdata;
-	co_t_node2 *con;
+	co_t_node *con;
 	struct can_frame frame;
 
 	/* Get arguments */
@@ -525,7 +526,7 @@ napi_value wrapper_co_pdo_recv(napi_env env, napi_callback_info info) {
 	size_t argc = 1;
 	napi_value argv[1];
 	napi_valuetype vt;
-	co_t_node2 *con;
+	co_t_node *con;
 
 	/* Get arguments */
 	status = napi_get_cb_info(env, info, &argc, argv, NULL, (void **)&con);
@@ -543,6 +544,15 @@ napi_value wrapper_co_pdo_recv(napi_env env, napi_callback_info info) {
 
 //// Create Node Function //////////////////////////////////////////////////////
 
+void wrapper_co_delete_node(napi_env env, void* finalize_data, void* finalize_hint){
+	co_t_node *con = (co_t_node *)finalize_data;
+	uv_poll_stop(&con->sdo_uvp);
+	uv_close((uv_handle_t *)&con->sdo_uvp, NULL);
+	uv_timer_stop(&con->sdo_uvt);
+	uv_close((uv_handle_t *)&con->sdo_uvt, NULL);
+	free(con);
+}
+
 napi_value wrapper_co_create_node(napi_env env, napi_callback_info info) {
 	napi_status status;
 	uv_loop_t *loop;
@@ -550,7 +560,7 @@ napi_value wrapper_co_create_node(napi_env env, napi_callback_info info) {
 	size_t argc = 2;
 	napi_value argv[2];
 
-	co_t_node2 * con;
+	co_t_node * con;
 	char device[16];
 	uint32_t node_id;
 
@@ -578,7 +588,8 @@ napi_value wrapper_co_create_node(napi_env env, napi_callback_info info) {
 	napi_assert(env, status);
 
 	/* ._co_t_node hold owner private data */
-	status = napi_create_buffer(env, sizeof(co_t_node2), (void **)&con, &tmp);
+	con = (co_t_node *)malloc(sizeof(co_t_node));
+	status = napi_create_external(env, con, wrapper_co_delete_node, NULL, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, object, "_co_t_node", tmp);
 	napi_assert(env, status);
@@ -676,7 +687,6 @@ napi_value wrapper_co_create_node(napi_env env, napi_callback_info info) {
 	/* No callback for PDO yet */
 	con->pdo_cb_ref = NULL;
 
-	/* TODO: Stop UV Lib stuff and clean. Add a finalizer to object */
 	return object;
 }
 

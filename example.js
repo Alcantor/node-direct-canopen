@@ -1,6 +1,15 @@
 const co = require('./direct-canopen.js');
 let node = co.create_node("can0", 1);
 
+/*
+// Test with "node --expose-gc example.js"
+function finalize_test(){
+	let node2 = co.create_node("can0", 2);
+	console.log("Garbage collector");
+}
+finalize_test();
+global.gc();
+*/
 function hanlde_sdo_upload_result(data){
 	if(data instanceof Error){
 		console.log(data);
