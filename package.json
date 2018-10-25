@@ -1,0 +1,18 @@
+{
+  "name": "direct-canopen",
+  "version": "0.0.1",
+  "description": "Another implementation of CANopen over SocketCAN",
+  "main": "ds2438z.js",
+  "scripts": {
+    "test": "node example.js"
+  },
+  "gypfile": true,
+  "keywords": [
+    "socketcan",
+    "canopen"
+  ],
+  "author": {
+    "name": "Julien Folly"
+  },
+  "license": "ISC"
+}
