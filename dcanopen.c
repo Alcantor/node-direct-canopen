@@ -705,6 +705,7 @@ napi_value Init(napi_env env, napi_value exports) {
 	status = napi_set_named_property(env, exports, "create_node", tmp);
 	napi_assert(env, status);
 
+/* -- Constants are set in Javascript now --
 	status = napi_create_uint32(env, CO_NMT_OPERATIONAL, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, exports, "NMT_OPERATIONAL", tmp);
@@ -729,7 +730,7 @@ napi_value Init(napi_env env, napi_value exports) {
 	napi_assert(env, status);
 	status = napi_set_named_property(env, exports, "NMT_RESET_COMMUNICATION", tmp);
 	napi_assert(env, status);
-
+*/
 	return exports;
 }
 
