@@ -2,7 +2,7 @@
   "name": "direct-canopen",
   "version": "0.0.1",
   "description": "Another implementation of CANopen over SocketCAN",
-  "main": "ds2438z.js",
+  "main": "direct-canopen.js",
   "scripts": {
     "test": "node example.js"
   },
