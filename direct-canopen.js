@@ -2,52 +2,40 @@ dco = require('./build/Release/dcanopen');
 
 function create_node(device, node_id){
 	let obj = dco.create_node(device, node_id);
-	obj["sdo_download_uint8"] = function (index, subindex, number, cb){
+	obj["sdo_download_uint8"] = function (index, subindex, number){
 			let data = new ArrayBuffer(1);
 			let v8 = new Uint8Array(data);
 			v8[0] = number;
-			obj.sdo_download(index, subindex, data, cb);
+			return obj.sdo_download(index, subindex, data);
 		}
-	obj["sdo_download_uint16"] = function (index, subindex, number, cb){
+	obj["sdo_download_uint16"] = function (index, subindex, number){
 			let data = new ArrayBuffer(2);
 			let v16 = new Uint16Array(data);
 			v16[0] = number;
-			obj.sdo_download(index, subindex, data, cb);
+			return obj.sdo_download(index, subindex, data);
 		}
-	obj["sdo_download_uint32"] = function (index, subindex, number, cb){
+	obj["sdo_download_uint32"] = function (index, subindex, number){
 			let data = new ArrayBuffer(4);
 			let v32 = new Uint32Array(data);
 			v32[0] = number;
-			obj.sdo_download(index, subindex, data, cb);
+			return obj.sdo_download(index, subindex, data);
 		}
-	obj["sdo_upload_uint8"] = function (index, subindex, cb){
-			obj.sdo_upload(index, subindex, data => {
-				if(data instanceof Error){
-					cb(data);
-					return;
-				}
-				let v8 = new Uint8Array(data);
-				cb(v8[0]);
+	obj["sdo_upload_uint8"] = function (index, subindex){
+			return obj.sdo_upload(index, subindex).then(data => {
+				var v8 = new Uint8Array(data);
+				return v8[0];
 			});
 		}
 	obj["sdo_upload_uint16"] = function (index, subindex, cb){
-			obj.sdo_upload(index, subindex, data => {
-				if(data instanceof Error){
-					cb(data);
-					return;
-				}
-				let v16 = new Uint16Array(data);
-				cb(v16[0]);
+			return obj.sdo_upload(index, subindex).then(data => {
+				var v16 = new Uint16Array(data);
+				return v16[0];
 			});
 		}
 	obj["sdo_upload_uint32"] = function (index, subindex, cb){
-			obj.sdo_upload(index, subindex, data => {
-				if(data instanceof Error){
-					cb(data);
-					return;
-				}
-				let v32 = new Uint32Array(data);
-				cb(v32[0]);
+			return obj.sdo_upload(index, subindex).then(data => {
+				var v32 = new Uint32Array(data);
+				return v32[0];
 			});
 		}
 	return obj;

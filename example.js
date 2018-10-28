@@ -1,5 +1,5 @@
 const co = require('./direct-canopen.js');
-let node = co.create_node("can0", 1);
+let node = co.create_node("can0", 2);
 
 /*
 // Test with "node --expose-gc example.js"
@@ -10,32 +10,38 @@ function finalize_test(){
 finalize_test();
 global.gc();
 */
-function hanlde_sdo_upload_result(data){
-	if(data instanceof Error){
-		console.log(data);
-		return;
-	}
-	console.log("Number outputs: "+ new Int8Array(data)[0]+" data length "+data.byteLength);
-}
 
-function result_cb(resp){
-	if(resp instanceof Error){
-		console.log(resp);
-		return;
-	}
-	console.log("OK");
-}
-node.sdo_upload_uint8(0x6200, 0, u8 => { console.log("Number outputs: "+u8); });
+node.sdo_upload_uint8(0x6000, 0).then(u8 => {
+	console.log("Number inputs: "+u8);
+},err => {
+	console.log("Error reading the number of inputs: "+err);
+});
+
+node.sdo_upload_uint8(0x6200, 0).then(u8 => {
+	console.log("Number outputs: "+u8);
+},err => {
+	console.log("Error reading the number of outputs: "+err);
+});
 
 /* Configure the RX PDO 0 of the Wago Wago 750-338 / 750-337 */
-node.sdo_download_uint32(0x1400, 1, 0x80000000, result_cb); /* Invalid COB - disable PDO 0 */
-node.sdo_download_uint8(0x1400, 2, 255, result_cb); /* Transfer type */
-node.sdo_download_uint8(0x1600, 0, 0, result_cb); /* Number of mapped object for PDO 0 */
-node.sdo_download_uint32(0x1600, 1, 0x62000008+0x100*1, result_cb); /* Mapped object */
-node.sdo_download_uint8(0x1600, 0, 1, result_cb); /* Number of mapped object for PDO 0 */
-node.sdo_download_uint8(0x6206, 1, 0xFF, result_cb); /* Error Mode Digital Output 8-Bit 1st Block */
-node.sdo_download_uint8(0x6207, 1, 0xFF, result_cb); /* Error Value Digital Output 8-Bit 1st Block */
-node.sdo_download_uint32(0x1400, 1, 0x200+1, result_cb); /* Valid COB - enable PDO 0 */
+Promise.all([
+	/* Invalid COB - disable PDO 0 */
+	node.sdo_download_uint32(0x1400, 1, 0x80000000),
+	/* Transfer type */
+	node.sdo_download_uint8(0x1400, 2, 255),
+	/* Number of mapped object for PDO 0 */
+	node.sdo_download_uint8(0x1600, 0, 0),
+	/* Mapped object */
+	node.sdo_download_uint32(0x1600, 1, 0x62000008+0x100*1),
+	/* Number of mapped object for PDO 0 */
+	node.sdo_download_uint8(0x1600, 0, 1),
+	/* Error Mode Digital Output 8-Bit 1st Block */
+	node.sdo_download_uint8(0x6206, 1, 0xFF),
+	/* Error Value Digital Output 8-Bit 1st Block */
+	node.sdo_download_uint8(0x6207, 1, 0xFF),
+	/* Valid COB - enable PDO 0 */
+	node.sdo_download_uint32(0x1400, 1, 0x200+1)
+]).catch(err => console.log("Error configuring RX PDO 0: "+err));
 
 /* Go into operational mode */
 setTimeout(function() {

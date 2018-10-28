@@ -143,7 +143,7 @@ struct co_s_pdo {
 #define QSIZE 64
 
 typedef struct {
-	napi_ref cb_ref;
+	napi_deferred promise;
 	struct can_frame cf;
 	enum co_e_sdo_scs expected_scs;
 } co_t_sdo_queue_item;
@@ -202,27 +202,26 @@ typedef struct {
 } co_t_node;
 
 //// uvlib callback ////////////////////////////////////////////////////////////
+void co_sdo_emit(co_t_node *con);
 void co_sdo_timeout_cb(uv_timer_t* handle){
 	co_t_node *con = (co_t_node *)handle->data;
 	co_t_sdo_queue_item *i;
 	napi_handle_scope nhs;
 	napi_status status;
-	napi_value argv[1], global, cb;
+	napi_value value;
 
 	i = co_sdo_queue_pop(&con->sdo_queue);
+	if(i == NULL) return;
 	napi_open_handle_scope(con->env, &nhs);
+	co_sdo_emit(con);
 
 	/* Parameter error details */
 	status = napi_create_string_utf8(con->env, "Timeout SDO Response",
-		NAPI_AUTO_LENGTH, &argv[0]);
+		NAPI_AUTO_LENGTH, &value);
 	napi_assert_async(con->env, status, nhs);
 
-	/* Call the callback */
-	status = napi_get_global(con->env, &global);
-	napi_assert_async(con->env, status, nhs);
-	status = napi_get_reference_value(con->env, i->cb_ref, &cb);
-	napi_assert_async(con->env, status, nhs);
-	status = napi_call_function(con->env, global, cb, 1, argv, NULL);
+	/* Reject the promise */
+	status = napi_reject_deferred(con->env, i->promise, value);
 	napi_assert_async(con->env, status, nhs);
 
 	napi_close_handle_scope(con->env, nhs);
@@ -240,16 +239,92 @@ void co_sdo_emit(co_t_node *con){
 	uv_timer_start(&con->sdo_uvt, co_sdo_timeout_cb, con->wait_time, 0);
 }
 
-void co_recv_cb(uv_poll_t* handle, int status, int events) {
-	co_t_node *con = (co_t_node *)handle->data;
+void co_recv_sdo(co_t_node *con, struct co_s_sdo *s){
 	co_t_sdo_queue_item *i;
-	struct can_frame frame;
-	struct co_s_sdo *s = (struct co_s_sdo *)frame.data;
-	napi_value argv[2], global, cb;
 	napi_handle_scope nhs;
-	int err;
+	napi_status status;
+	napi_value value;
 	void *jsdata;
 	size_t jslen;
+
+	/* We receive a SDO: stop timer and send the next SDO */
+	i = co_sdo_queue_pop(&con->sdo_queue);
+	if(i == NULL) return;
+	uv_timer_stop(&con->sdo_uvt);
+	napi_open_handle_scope(con->env, &nhs);
+	co_sdo_emit(con);
+
+	/* Check the type of SDO */
+	if(s->header.bits.cs != i->expected_scs) {
+		/* Error details */
+		status = napi_create_error_utf8(con->env, "Unexpected SDO response", &value);
+		napi_assert_async(con->env, status, nhs);
+
+		/* Reject the promise */
+		status = napi_reject_deferred(con->env, i->promise, value);
+		napi_assert_async(con->env, status, nhs);
+	/* We only support SDO upload up to 4 bytes */
+	}else if(s->header.bits.cs == CO_SCS_UPLOAD_INIT_RESPONSE &&
+			(s->header.bits.e != 1 || s->header.bits.s != 1)) {
+		/* Error details */
+		status = napi_create_error_utf8(con->env, "Unimplemented SDO response (length >4)", &value);
+		napi_assert_async(con->env, status, nhs);
+
+		/* Reject the promise */
+		status = napi_reject_deferred(con->env, i->promise, value);
+		napi_assert_async(con->env, status, nhs);
+	}else{
+		/* Set the data */
+		jslen = 4-s->header.bits.n;
+		status = napi_create_arraybuffer(con->env, jslen, &jsdata, &value);
+		napi_assert_async(con->env, status, nhs);
+		memcpy(jsdata, s->data, jslen);
+
+		/* Resole the promise */
+		status = napi_resolve_deferred(con->env, i->promise, value);
+		napi_assert_async(con->env, status, nhs);
+	}
+
+	napi_close_handle_scope(con->env, nhs);
+}
+
+void co_recv_pdo(co_t_node *con, struct can_frame *frame){
+	napi_handle_scope nhs;
+	napi_status status;
+	napi_value argv[2], global, cb;
+	void *jsdata;
+	size_t jslen;
+
+	/* No callback, do nothing. */
+	if(con->pdo_cb_ref == NULL) return;
+
+	napi_open_handle_scope(con->env, &nhs);
+
+	/* 1. Parameter is the PDO id */
+	status = napi_create_uint32(con->env, ((frame->can_id - 0x100) >> 8) & 3, &argv[0]);
+	napi_assert_async(con->env, status, nhs);
+
+	/* 2. Parameter is the data */
+	jslen = frame->can_dlc;
+	status = napi_create_arraybuffer(con->env, jslen, &jsdata, &argv[1]);
+	napi_assert_async(con->env, status, nhs);
+	memcpy(jsdata, frame->data, jslen);
+
+	/* Call the callback */
+	status = napi_get_global(con->env, &global);
+	napi_assert_async(con->env, status, nhs);
+	status = napi_get_reference_value(con->env, con->pdo_cb_ref, &cb);
+	napi_assert_async(con->env, status, nhs);
+	status = napi_call_function(con->env, global, cb, 2, argv, NULL);
+	napi_assert_async(con->env, status, nhs);
+
+	napi_close_handle_scope(con->env, nhs);
+}
+
+void co_recv_cb(uv_poll_t* handle, int status, int events) {
+	co_t_node *con = (co_t_node *)handle->data;
+	struct can_frame frame;
+	int err;
 
 	err = read(con->canfd, &frame, sizeof(struct can_frame));
 	if(err != sizeof(struct can_frame))
@@ -257,69 +332,11 @@ void co_recv_cb(uv_poll_t* handle, int status, int events) {
 
 	/* Receive an SDO */
 	if(frame.can_id == 0x580+con->node_id){
-		/* We receive a SDO: stop timer and send the next SDO */
-		i = co_sdo_queue_pop(&con->sdo_queue);
-		if(i == NULL){
-			return;
-		}
-		uv_timer_stop(&con->sdo_uvt);		
-		napi_open_handle_scope(con->env, &nhs);
-		co_sdo_emit(con);
-
-		/* Check the type of SDO */
-		if(s->header.bits.cs != i->expected_scs) {
-			/* Error details */
-			status = napi_create_error_utf8(con->env, "Unexpected SDO response", &argv[0]);
-			napi_assert_async(con->env, status, nhs);
-		/* We only support SDO upload up to 4 bytes */
-		}else if(s->header.bits.cs == CO_SCS_UPLOAD_INIT_RESPONSE &&
-				(s->header.bits.e != 1 || s->header.bits.s != 1)) {
-			/* Error details */
-			status = napi_create_error_utf8(con->env, "Unimplemented SDO response (length >4)", &argv[0]);
-			napi_assert_async(con->env, status, nhs);
-		}else{
-			/* Set the data */
-			jslen = 4-s->header.bits.n;
-			status = napi_create_arraybuffer(con->env, jslen, &jsdata, &argv[0]);
-			napi_assert_async(con->env, status, nhs);
-			memcpy(jsdata, s->data, jslen);
-		}
-
-		/* Call the callback */
-		status = napi_get_global(con->env, &global);
-		napi_assert_async(con->env, status, nhs);
-		status = napi_get_reference_value(con->env, i->cb_ref, &cb);
-		napi_assert_async(con->env, status, nhs);
-		status = napi_call_function(con->env, global, cb, 1, argv, NULL);
-		napi_assert_async(con->env, status, nhs);
-		
-		napi_close_handle_scope(con->env, nhs);
+		co_recv_sdo(con, (struct co_s_sdo *)frame.data);
 	/* PDO 0-3 */
 	}else if((frame.can_id == 0x180+con->node_id || frame.can_id == 0x280+con->node_id ||
-		frame.can_id == 0x380+con->node_id || frame.can_id == 0x480+con->node_id) &&
-		con->pdo_cb_ref != NULL){
-
-		napi_open_handle_scope(con->env, &nhs);
-
-		/* 1. Parameter is the PDO id */
-		status = napi_create_uint32(con->env, ((frame.can_id - 0x100) >> 8) & 3, &argv[0]);
-		napi_assert_async(con->env, status, nhs);
-
-		/* 2. Parameter is the data */
-		jslen = frame.can_dlc;
-		status = napi_create_arraybuffer(con->env, jslen, &jsdata, &argv[1]);
-		napi_assert_async(con->env, status, nhs);
-		memcpy(jsdata, frame.data, jslen);
-
-		/* Call the callback */
-		status = napi_get_global(con->env, &global);
-		napi_assert_async(con->env, status, nhs);
-		status = napi_get_reference_value(con->env, con->pdo_cb_ref, &cb);
-		napi_assert_async(con->env, status, nhs);
-		status = napi_call_function(con->env, global, cb, 2, argv, NULL);
-		napi_assert_async(con->env, status, nhs);
-
-		napi_close_handle_scope(con->env, nhs);
+		frame.can_id == 0x380+con->node_id || frame.can_id == 0x480+con->node_id)){
+ 		co_recv_pdo(con, &frame);
 	}
 }
 
@@ -357,12 +374,11 @@ napi_value wrapper_co_nmt_send(napi_env env, napi_callback_info info){
 
 napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
 	napi_status status;
-	size_t argc = 4;
-	napi_value argv[4];
+	size_t argc = 3;
+	napi_value argv[3], return_value;
 	uint32_t index, subindex;
 	void *jsdata;
 	size_t jslen;
-	napi_valuetype vt;
 	co_t_node *con;
 	struct can_frame *frame;
 	struct co_s_sdo *s;
@@ -386,17 +402,12 @@ napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
 	napi_assert(env, status);
 	napi_assert_other(env, jslen > 4, "Unimplemented SDO request (length >4)");
 
-	/* 4. Parameter is the callback */
-	status = napi_typeof(env, argv[3], &vt);
-	napi_assert(env, status);
-	napi_assert_other(env, vt != napi_function, "Invalid callback");
-
 	/* Get a free queue item */
 	i = co_sdo_queue_push(&con->sdo_queue);
 	napi_assert_other(env, i == NULL, "SDO queue full!")
 
-	/* Save the callback */
-	status = napi_create_reference(env, argv[3], 1, &i->cb_ref);
+	/* Create a promise */
+	status = napi_create_promise(env, &i->promise, &return_value);
 	napi_assert(env, status);
 
 	/* Fill the CANopen data */
@@ -422,14 +433,13 @@ napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
 	if(co_sdo_queue_size(&con->sdo_queue) == 1)
 		co_sdo_emit(con);
 
-	return g_napi_null;
+	return return_value;
 }
 
 napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
 	napi_status status;
-	size_t argc = 3;
-	napi_value argv[3];
-	napi_valuetype vt;
+	size_t argc = 2;
+	napi_value argv[2], return_value;
 	co_t_node *con;
 	uint32_t index, subindex;
 	struct can_frame *frame;
@@ -448,17 +458,12 @@ napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
 	status = napi_get_value_uint32(env, argv[1], &subindex);
 	napi_assert(env, status);
 
-	/* 3. Parameter is the callback */
-	status = napi_typeof(env, argv[2], &vt);
-	napi_assert(env, status);
-	napi_assert_other(env, vt != napi_function, "Invalid callback");
-
 	/* Get a free queue item */
 	i = co_sdo_queue_push(&con->sdo_queue);
 	napi_assert_other(env, i == NULL, "SDO queue full!")
 
-	/* Save the callback */
-	status = napi_create_reference(env, argv[2], 1, &i->cb_ref);
+	/* Create a promise */
+	status = napi_create_promise(env, &i->promise, &return_value);
 	napi_assert(env, status);
 
 	/* Fill the CANopen data */
@@ -482,7 +487,7 @@ napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
 	if(co_sdo_queue_size(&con->sdo_queue) == 1)
 		co_sdo_emit(con);
 
-	return g_napi_null;
+	return return_value;
 }
 
 //// PDO Functions /////////////////////////////////////////////////////////////
