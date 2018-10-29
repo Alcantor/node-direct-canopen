@@ -1,42 +1,79 @@
 dco = require('./build/Release/dcanopen');
 
 function create_node(device, node_id){
-	let obj = dco.create_node(device, node_id);
-	obj["sdo_download_uint8"] = function (index, subindex, number){
-			let data = new ArrayBuffer(1);
-			let v8 = new Uint8Array(data);
+	var obj = dco.create_node(device, node_id);
+	obj.sdo_download_array = function (index, subindex, array){
+			return new Promise(function(resolve, reject) {
+				obj.sdo_download(index, subindex, array, res =>{
+					if(res instanceof Error) reject(res);
+					else resolve(res);
+				});
+			});
+		}
+	obj.sdo_download_uint8 = function (index, subindex, number){
+			var data = new ArrayBuffer(1);
+			var v8 = new Uint8Array(data);
 			v8[0] = number;
-			return obj.sdo_download(index, subindex, data);
+			return new Promise(function(resolve, reject) {
+				obj.sdo_download(index, subindex, data, res =>{
+					if(res instanceof Error) reject(res);
+					else resolve(res);
+				});
+			});
 		}
-	obj["sdo_download_uint16"] = function (index, subindex, number){
-			let data = new ArrayBuffer(2);
-			let v16 = new Uint16Array(data);
+	obj.sdo_download_uint16 = function (index, subindex, number){
+			var data = new ArrayBuffer(2);
+			var v16 = new Uint16Array(data);
 			v16[0] = number;
-			return obj.sdo_download(index, subindex, data);
+			return new Promise(function(resolve, reject) {
+				obj.sdo_download(index, subindex, data, res =>{
+					if(res instanceof Error) reject(res);
+					else resolve(res);
+				});
+			});
 		}
-	obj["sdo_download_uint32"] = function (index, subindex, number){
-			let data = new ArrayBuffer(4);
-			let v32 = new Uint32Array(data);
+	obj.sdo_download_uint32 = function (index, subindex, number){
+			var data = new ArrayBuffer(4);
+			var v32 = new Uint32Array(data);
 			v32[0] = number;
-			return obj.sdo_download(index, subindex, data);
-		}
-	obj["sdo_upload_uint8"] = function (index, subindex){
-			return obj.sdo_upload(index, subindex).then(data => {
-				var v8 = new Uint8Array(data);
-				return v8[0];
+			return new Promise(function(resolve, reject) {
+				obj.sdo_download(index, subindex, data, res =>{
+					if(res instanceof Error) reject(res);
+					else resolve(res);
+				});
 			});
 		}
-	obj["sdo_upload_uint16"] = function (index, subindex, cb){
-			return obj.sdo_upload(index, subindex).then(data => {
-				var v16 = new Uint16Array(data);
-				return v16[0];
+	obj.sdo_upload_array = function (index, subindex){
+			return new Promise(function(resolve, reject) {
+				obj.sdo_upload(index, subindex, res =>{
+					if(res instanceof Error) reject(res);
+					else resolve(res);
+				});
 			});
 		}
-	obj["sdo_upload_uint32"] = function (index, subindex, cb){
-			return obj.sdo_upload(index, subindex).then(data => {
-				var v32 = new Uint32Array(data);
-				return v32[0];
+	obj.sdo_upload_uint8 = function (index, subindex){
+			return new Promise(function(resolve, reject) {
+				obj.sdo_upload(index, subindex, res =>{
+					if(res instanceof Error) reject(res);
+					else resolve(new Uint8Array(res)[0]);
+				});
 			});
+		}
+	obj.sdo_upload_uint16 = function (index, subindex, cb){
+			return new Promise(function(resolve, reject) {
+				obj.sdo_upload(index, subindex, res =>{
+					if(res instanceof Error) reject(res);
+					else resolve(new Uint16Array(res)[0]);
+				});
+			});
+		}
+	obj.sdo_upload_uint32 = function (index, subindex, cb){
+			return new Promise(function(resolve, reject) {
+				obj.sdo_upload(index, subindex, res =>{
+					if(res instanceof Error) reject(res);
+					else resolve(new Uint32Array(res)[0]);
+				});
+			});;
 		}
 	return obj;
 }
