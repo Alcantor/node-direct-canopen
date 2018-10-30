@@ -12,7 +12,7 @@ global.gc();
 */
 
 /* Configure the TX PDO 0 for max 64 digital inputs */
-function wago_pdo0tx_input(con, nb_bl_in, node_id){
+function wago_pdo0tx_input(con, nb_bl_in){
 	var promises = [
 		/* Invalid COB - disable PDO 0 */
 		con.sdo_download_uint32(0x1800, 1, 0x80000000),
@@ -37,7 +37,7 @@ function wago_pdo0tx_input(con, nb_bl_in, node_id){
 		/* Number of mapped object for PDO 0 */
 		con.sdo_download_uint8 (0x1A00, 0,   nb_bl_in),
 		/* Valid COB - enable PDO 0 */
-		con.sdo_download_uint32(0x1800, 1, 0x180+node_id)
+		con.sdo_download_uint32(0x1800, 1, 0x180+con.node_id)
 	);
 	return Promise.all(promises).catch(err => {
 		console.log("Error configuring TX PDO 0: "+err)
@@ -45,7 +45,7 @@ function wago_pdo0tx_input(con, nb_bl_in, node_id){
 }
 
 /* Configure the RX PDO 0 for max 64 digital outputs */
-function wago_pdo0rx_output(con, nb_bl_out, node_id){
+function wago_pdo0rx_output(con, nb_bl_out){
 	var promises = [
 		/* Invalid COB - disable PDO 0 */
 		con.sdo_download_uint32(0x1400, 1, 0x80000000),
@@ -66,7 +66,7 @@ function wago_pdo0rx_output(con, nb_bl_out, node_id){
 		/* Number of mapped object for PDO 0 */
 		con.sdo_download_uint8 (0x1600, 0, nb_bl_out),
 		/* Valid COB - enable PDO 0 */
-		con.sdo_download_uint32(0x1400, 1, 0x200+node_id)
+		con.sdo_download_uint32(0x1400, 1, 0x200+con.node_id)
 	);
 	return Promise.all(promises).catch(err => {
 		console.log("Error configuring RX PDO 0: "+err)
