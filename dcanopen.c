@@ -216,8 +216,7 @@ void co_sdo_timeout_cb(uv_timer_t* handle){
 	co_sdo_emit(con);
 
 	/* Parameter error details */
-	status = napi_create_string_utf8(con->env, "Timeout SDO Response",
-		NAPI_AUTO_LENGTH, &argv[0]);
+	status = napi_create_error_utf8(con->env, "Timeout SDO Response", &argv[0]);
 	napi_assert_async(con->env, status, nhs);
 
 	/* Call the callback */
