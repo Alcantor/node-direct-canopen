@@ -1,6 +1,6 @@
 {
   "name": "direct-canopen",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Another implementation of CANopen over SocketCAN",
   "main": "direct-canopen.js",
   "scripts": {

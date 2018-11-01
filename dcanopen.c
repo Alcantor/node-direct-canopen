@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <endian.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -16,7 +15,7 @@ napi_value g_napi_null;
 
 //// Userful error management //////////////////////////////////////////////////
 
-void napi_throw_last_error(napi_env env){
+void napi_throw_last_error(napi_env env) {
 	napi_status status;
 	const napi_extended_error_info* r;
 	const char *msg;
@@ -26,7 +25,7 @@ void napi_throw_last_error(napi_env env){
 	napi_throw_error(env, NULL, msg);
 }
 
-void napi_fatal_last_error(napi_env env, const char *file, unsigned int line){
+void napi_fatal_last_error(napi_env env, const char *file, unsigned int line) {
 	napi_status status;
 	const napi_extended_error_info* r;
 	const char *msg;
@@ -36,6 +35,16 @@ void napi_fatal_last_error(napi_env env, const char *file, unsigned int line){
 	if (status == napi_ok) msg = r->error_message;
 	else msg = "Unknow fatal error";
 	napi_fatal_error(location, NAPI_AUTO_LENGTH, msg, NAPI_AUTO_LENGTH);
+}
+
+napi_status napi_create_error_utf8(napi_env env,
+		const char *msg, napi_value *result){
+	napi_status status;	
+	napi_value nmsg;
+	status = napi_create_string_utf8(env, msg, NAPI_AUTO_LENGTH, &nmsg);
+	if (status != napi_ok) return status;
+	status = napi_create_error(env, NULL, nmsg, result);
+	return status;
 }
 
 #define napi_assert(env, status) { \
@@ -60,54 +69,60 @@ void napi_fatal_last_error(napi_env env, const char *file, unsigned int line){
 	} \
 }
 
-napi_status napi_create_error_utf8(napi_env env, const char *msg, napi_value *result) {
-	napi_status status;	
-	napi_value nmsg;
-	status = napi_create_string_utf8(env, msg, NAPI_AUTO_LENGTH, &nmsg);
-	if (status != napi_ok) return status;
-	status = napi_create_error(env, NULL, nmsg, result);
-	return status;
-}
-
 //// CANopen structures ////////////////////////////////////////////////////////
 
 /* NMT State */
-enum co_e_nmt_state {
+typedef enum {
 	CO_NMT_OPERATIONAL=0x01,
 	CO_NMT_STOP=0x02,
 	CO_NMT_PRE_OPERATIONAL=0x80,
 	CO_NMT_RESET_NODE=0x81,
 	CO_NMT_RESET_COMMUNICATION=0x82
-};
+} co_t_nmt_state;
 
 /* NMT Object */
-struct co_s_nmt {
-	enum co_e_nmt_state state : 8;
+typedef struct {
+	co_t_nmt_state state : 8;
 	uint8_t node_id;
-} __attribute__((packed));
+} __attribute__((packed)) co_t_nmt;
 
-/* Client command  specifier (Master to Node) */
-enum co_e_sdo_ccs {
+/* NMT State */
+typedef enum {
+	CO_HB_BOOT=0x00,
+	CO_HB_STOPPED=0x04,
+	CO_HB_OPERATIONAL=0x05,
+	CO_HB_PRE_OPERATIONAL=0x7F
+} co_t_hb_state;
+
+/* Heartbeat Object */
+typedef union {
+	struct {
+		co_t_hb_state state: 7;
+		uint8_t toggle_bit : 1;
+	} bits;
+	uint8_t byte;
+} __attribute__((packed)) co_t_hb;
+
+/* Client command specifier (Master to Node) */
+typedef enum {
 	CO_CCS_DOWNLOAD_INIT=1,
 	CO_CCS_DOWNLOAD_SEGMENT=0,
 	CO_CCS_UPLOAD_INIT=2,
 	CO_CCS_UPLOAD_SEGMENT=3,
-	CO_CCS_ABORT  =4,
-	CO_CCS_NOTHING=-1
-};
+	CO_CCS_ABORT  =4
+} co_t_sdo_ccs;
 
-/* Server command  specifier (Node to Master)  */
-enum co_e_sdo_scs {
+/* Server command specifier (Node to Master)  */
+typedef enum {
 	CO_SCS_DOWNLOAD_INIT_RESPONSE=3,
 	CO_SCS_DOWNLOAD_SEGMENT_RESPONSE=1,
 	CO_SCS_UPLOAD_INIT_RESPONSE=2,
 	CO_SCS_UPLOAD_SEGMENT_RESPONSE=0,
-	CO_SCS_ABORT=4,
-	CO_SCS_NOTHING=-1
-};
+	CO_SCS_ABORT=4
+} co_t_sdo_scs;
 
 /* SDO Object */
-struct co_s_sdo {
+typedef struct {
 	union{
 		struct {
 			uint8_t s  : 1; /* size is specified in n */
@@ -121,20 +136,20 @@ struct co_s_sdo {
 	uint16_t index;
 	uint8_t  subindex;
 	uint8_t  data[4];
-} __attribute__((packed));
+} __attribute__((packed)) co_t_sdo;
 
 /* PDO IDs*/
-enum co_e_pdo_id {
+typedef enum {
 	CO_PDO_ID0=0,
 	CO_PDO_ID1=1,
 	CO_PDO_ID2=2,
 	CO_PDO_ID3=3
-};
+} co_t_pdo_id;
 
 /* PDO Object */
-struct co_s_pdo {
+typedef struct {
 	uint8_t  data[8];
-} __attribute__((packed));
+} __attribute__((packed)) co_t_pdo;
 
 //// SDO Queue /////////////////////////////////////////////////////////////////
 
@@ -144,24 +159,24 @@ typedef struct {
 	napi_ref cb_ref;
 	napi_async_context cb_ctx;
 	struct can_frame cf;
-	enum co_e_sdo_scs expected_scs;
+	co_t_sdo_scs expected_scs;
 } co_t_sdo_queue_item;
 
 typedef struct {
 	co_t_sdo_queue_item items[QSIZE];
 	unsigned int head, tail;
-}co_t_sdo_queue;
+} co_t_sdo_queue;
 
-void co_sdo_queue_reset(co_t_sdo_queue *q){
+void co_sdo_queue_reset(co_t_sdo_queue *q) {
 	q->head = q->tail = 0;
 }
 
-unsigned int co_sdo_queue_size(co_t_sdo_queue *q){
+unsigned int co_sdo_queue_size(co_t_sdo_queue *q) {
 	//if(q->tail > q->head) printf("Queue inconsistency error!\n");
 	return q->head - q->tail;
 }
 
-co_t_sdo_queue_item *co_sdo_queue_pop(co_t_sdo_queue *q){
+co_t_sdo_queue_item *co_sdo_queue_pop(co_t_sdo_queue *q) {
 	/* Return NULL if queue is empty */
 	if(co_sdo_queue_size(q) == 0) return NULL;
 
@@ -169,7 +184,7 @@ co_t_sdo_queue_item *co_sdo_queue_pop(co_t_sdo_queue *q){
 	return &q->items[q->tail++];
 }
 
-co_t_sdo_queue_item *co_sdo_queue_get(co_t_sdo_queue *q){
+co_t_sdo_queue_item *co_sdo_queue_get(co_t_sdo_queue *q) {
 	/* Return NULL if queue is empty */
 	if(co_sdo_queue_size(q) == 0) return NULL;
 
@@ -177,7 +192,7 @@ co_t_sdo_queue_item *co_sdo_queue_get(co_t_sdo_queue *q){
 	return &q->items[q->tail];
 }
 
-co_t_sdo_queue_item *co_sdo_queue_push(co_t_sdo_queue *q){
+co_t_sdo_queue_item *co_sdo_queue_push(co_t_sdo_queue *q) {
 	/* If the queue is empty, reset it directly */
 	if(co_sdo_queue_size(q) == 0) co_sdo_queue_reset(q);
 
@@ -189,21 +204,90 @@ co_t_sdo_queue_item *co_sdo_queue_push(co_t_sdo_queue *q){
 }
 
 //// Node structure ////////////////////////////////////////////////////////////
-typedef struct {	
+typedef struct {
+	/* Node.js Stuff */
 	napi_env env;
 	canid_t node_id;
+
+	/* CAN Hardware Stuff */
 	int canfd;
+	uv_poll_t can_uvp;
+
+	/* SDO Stuff */
 	co_t_sdo_queue sdo_queue;
-	uv_poll_t sdo_uvp;
 	uv_timer_t sdo_uvt;
-	unsigned int wait_time;
-	napi_ref cb_pdo_ref;
-	napi_async_context cb_pdo_ctx;
+	unsigned int sdo_wait_time;
+
+	/* PDO Stuff */
+	napi_ref pdo_cb_ref;
+	napi_async_context pdo_cb_ctx;
+
+	/* Heartbeat Stuff */
+	napi_ref hb_cb_ref;
+	napi_async_context hb_cb_ctx;
+	uv_timer_t hb_uvt;
+	unsigned int hb_wait_time;
+	uint8_t hb_last_toggle_bit;
 } co_t_node;
 
 //// uvlib callback ////////////////////////////////////////////////////////////
+void co_hb_timeout_cb(uv_timer_t* handle) {
+	co_t_node *con = (co_t_node *)handle->data;
+	napi_handle_scope nhs;
+	napi_status status;
+	napi_value argv[1], global, cb;
+
+	napi_open_handle_scope(con->env, &nhs);
+
+	/* Parameter error details */
+	status = napi_create_error_utf8(con->env, "Timeout HB Response", &argv[0]);
+	napi_assert_async(con->env, status, nhs);
+
+	/* Call the callback */
+	status = napi_get_global(con->env, &global);
+	napi_assert_async(con->env, status, nhs);
+	status = napi_get_reference_value(con->env, con->hb_cb_ref, &cb);
+	napi_assert_async(con->env, status, nhs);
+	status = napi_make_callback(con->env, con->hb_cb_ctx, global, cb, 1, argv, NULL);
+	napi_assert_async(con->env, status, nhs);
+
+	napi_close_handle_scope(con->env, nhs);
+}
+
+void co_hb_recv(co_t_node *con, co_t_hb *d) {
+	napi_handle_scope nhs;
+	napi_status status;
+	napi_value argv[1], global, cb;
+
+	/* No callback, do nothing. */
+	if(con->hb_cb_ref == NULL) return;	
+	uv_timer_stop(&con->hb_uvt);
+	napi_open_handle_scope(con->env, &nhs);
+
+	if(con->hb_last_toggle_bit == d->bits.toggle_bit){
+		/* Parameter error details */
+		status = napi_create_error_utf8(con->env, "Heartbeat bit has not toggle", &argv[0]);
+		napi_assert_async(con->env, status, nhs);
+	}else{
+		/* 1. Parameter is the state */
+		status = napi_create_uint32(con->env, d->bits.state, &argv[0]);
+		napi_assert_async(con->env, status, nhs);
+	}
+	con->hb_last_toggle_bit = d->bits.toggle_bit;
+
+	/* Call the callback */
+	status = napi_get_global(con->env, &global);
+	napi_assert_async(con->env, status, nhs);
+	status = napi_get_reference_value(con->env, con->hb_cb_ref, &cb);
+	napi_assert_async(con->env, status, nhs);
+	status = napi_make_callback(con->env, con->hb_cb_ctx, global, cb, 1, argv, NULL);
+	napi_assert_async(con->env, status, nhs);
+
+	napi_close_handle_scope(con->env, nhs);
+}
+
 void co_sdo_emit(co_t_node *con);
-void co_sdo_timeout_cb(uv_timer_t* handle){
+void co_sdo_timeout_cb(uv_timer_t* handle) {
 	co_t_node *con = (co_t_node *)handle->data;
 	co_t_sdo_queue_item *i;
 	napi_handle_scope nhs;
@@ -230,19 +314,19 @@ void co_sdo_timeout_cb(uv_timer_t* handle){
 	napi_close_handle_scope(con->env, nhs);
 }
 
-void co_sdo_emit(co_t_node *con){
+void co_sdo_emit(co_t_node *con) {
 	struct can_frame *frame;
 	/* Return directly, if the queue is empty */
 	if(co_sdo_queue_size(&con->sdo_queue) == 0)
 		return;
+	/* Send the SDO */
 	frame = &co_sdo_queue_get(&con->sdo_queue)->cf;
 	if(write(con->canfd, frame, sizeof(struct can_frame)) < 0)
 		napi_throw_error(con->env, NULL, "Cannot write socket");
-
-	uv_timer_start(&con->sdo_uvt, co_sdo_timeout_cb, con->wait_time, 0);
+	uv_timer_start(&con->sdo_uvt, co_sdo_timeout_cb, con->sdo_wait_time, 0);
 }
 
-void co_recv_sdo(co_t_node *con, struct co_s_sdo *s){
+void co_sdo_recv(co_t_node *con, co_t_sdo *s) {
 	co_t_sdo_queue_item *i;
 	napi_handle_scope nhs;
 	napi_status status;
@@ -287,40 +371,38 @@ void co_recv_sdo(co_t_node *con, struct co_s_sdo *s){
 	napi_close_handle_scope(con->env, nhs);
 }
 
-void co_recv_pdo(co_t_node *con, struct can_frame *frame){
+void co_pdo_recv(co_t_node *con, co_t_pdo_id id, co_t_pdo *p, size_t len) {
 	napi_handle_scope nhs;
 	napi_status status;
 	napi_value argv[2], global, cb;
 	void *jsdata;
-	size_t jslen;
 
 	/* No callback, do nothing. */
-	if(con->cb_pdo_ref == NULL) return;
+	if(con->pdo_cb_ref == NULL) return;
 
 	napi_open_handle_scope(con->env, &nhs);
 
 	/* 1. Parameter is the PDO id */
-	status = napi_create_uint32(con->env, ((frame->can_id - 0x100) >> 8) & 3, &argv[0]);
+	status = napi_create_uint32(con->env, id, &argv[0]);
 	napi_assert_async(con->env, status, nhs);
 
 	/* 2. Parameter is the data */
-	jslen = frame->can_dlc;
-	status = napi_create_arraybuffer(con->env, jslen, &jsdata, &argv[1]);
+	status = napi_create_arraybuffer(con->env, len, &jsdata, &argv[1]);
 	napi_assert_async(con->env, status, nhs);
-	memcpy(jsdata, frame->data, jslen);
+	memcpy(jsdata, p->data, len);
 
 	/* Call the callback */
 	status = napi_get_global(con->env, &global);
 	napi_assert_async(con->env, status, nhs);
-	status = napi_get_reference_value(con->env, con->cb_pdo_ref, &cb);
+	status = napi_get_reference_value(con->env, con->pdo_cb_ref, &cb);
 	napi_assert_async(con->env, status, nhs);
-	status = napi_make_callback(con->env, con->cb_pdo_ctx, global, cb, 2, argv, NULL);
+	status = napi_make_callback(con->env, con->pdo_cb_ctx, global, cb, 2, argv, NULL);
 	napi_assert_async(con->env, status, nhs);
 
 	napi_close_handle_scope(con->env, nhs);
 }
 
-void co_recv_cb(uv_poll_t* handle, int status, int events) {
+void co_can_recv_cb(uv_poll_t* handle, int status, int events) {
 	co_t_node *con = (co_t_node *)handle->data;
 	struct can_frame frame;
 	int err;
@@ -329,26 +411,36 @@ void co_recv_cb(uv_poll_t* handle, int status, int events) {
 	if(err != sizeof(struct can_frame))
 		return; /* Ignore invalid can frame */
 
+	/* The node ID is encoded on the low 7 bits, we can safely ignore them
+	   because CAN-Filter is set to receive only messages from one node . */
+	frame.can_id >>= 7;
+
 	/* Receive an SDO */
-	if(frame.can_id == 0x580+con->node_id){
-		co_recv_sdo(con, (struct co_s_sdo *)frame.data);
+	if(frame.can_id == 0xB)
+		co_sdo_recv(con, (co_t_sdo *)frame.data);
 	/* PDO 0-3 */
-	}else if((frame.can_id == 0x180+con->node_id || frame.can_id == 0x280+con->node_id ||
-		frame.can_id == 0x380+con->node_id || frame.can_id == 0x480+con->node_id)){
- 		co_recv_pdo(con, &frame);
-	}
+	else if(frame.can_id == 0x3)
+		co_pdo_recv(con,CO_PDO_ID0,(co_t_pdo*)frame.data,frame.can_dlc);
+	else if(frame.can_id == 0x5)
+		co_pdo_recv(con,CO_PDO_ID1,(co_t_pdo*)frame.data,frame.can_dlc);
+	else if(frame.can_id == 0x7)
+		co_pdo_recv(con,CO_PDO_ID2,(co_t_pdo*)frame.data,frame.can_dlc);
+	else if(frame.can_id == 0x9)
+		co_pdo_recv(con,CO_PDO_ID3,(co_t_pdo*)frame.data,frame.can_dlc);
+	/* Heartbeat */
+	else if(frame.can_id == 0xE)
+		co_hb_recv(con, (co_t_hb *)frame.data);
 }
 
 //// NMT Functions /////////////////////////////////////////////////////////////
-
-napi_value wrapper_co_nmt_send(napi_env env, napi_callback_info info){
+napi_value co_nmt_send(napi_env env, napi_callback_info info) {
 	napi_status status;
 	size_t argc = 1;
 	napi_value argv[1];
 	co_t_node *con;
 	uint32_t state; /* Use uint32_t and not enum co_e_nmt_state */
 	struct can_frame frame;
-	struct co_s_nmt *d = (struct co_s_nmt *)frame.data;
+	co_t_nmt *n = (co_t_nmt *)frame.data;
 
 	/* Get arguments */
 	status = napi_get_cb_info(env, info, &argc, argv, NULL, (void **)&con);
@@ -358,20 +450,57 @@ napi_value wrapper_co_nmt_send(napi_env env, napi_callback_info info){
 	status = napi_get_value_uint32(env, argv[0], &state);
 	napi_assert(env, status);
 
+	/* Send the NMT command */
 	frame.can_id = 0x000;
-	d->state = state;
-	d->node_id = con->node_id;
-	frame.can_dlc = sizeof(struct co_s_nmt);
-
+	n->state = state;
+	n->node_id = con->node_id;
+	frame.can_dlc = sizeof(co_t_nmt);
 	if(write(con->canfd, &frame, sizeof(struct can_frame)) < 0)
 		napi_throw_error(con->env, NULL, "Cannot write socket");
 
 	return g_napi_null;
 }
 
-//// SDO Functions /////////////////////////////////////////////////////////////
+//// Heartbeat Functions ///////////////////////////////////////////////////////
+napi_value co_heartbeat(napi_env env, napi_callback_info info) {
+	napi_status status;
+	size_t argc = 1;
+	napi_value argv[1], tmp;
+	napi_valuetype vt;
+	co_t_node *con;
+	struct can_frame frame;
+	co_t_hb *d = (co_t_hb *)frame.data;
 
-napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
+	/* Get arguments */
+	status = napi_get_cb_info(env, info, &argc, argv, NULL, (void **)&con);
+	napi_assert(env, status);
+
+	/* 1. Parameter is the callback, mandatory only the first time */
+	if(argc >= 1 || con->hb_cb_ref == NULL) {
+		status = napi_typeof(env, argv[0], &vt);
+		napi_assert(env, status);
+		napi_assert_other(env, vt != napi_function, "Invalid callback");
+		status = napi_create_string_utf8(env, "HB Callback Context", NAPI_AUTO_LENGTH, &tmp);
+		napi_assert(env, status);
+		status = napi_async_init(env, NULL, tmp, &con->hb_cb_ctx);
+		napi_assert(env, status);
+		status = napi_create_reference(env, argv[0], 1, &con->hb_cb_ref);
+		napi_assert(env, status);
+	}
+
+	/* Send a heartbeat */
+	frame.can_id = (0x700+con->node_id) | CAN_RTR_FLAG;
+	d->byte = 0;
+	frame.can_dlc = sizeof(co_t_hb);
+	if(write(con->canfd, &frame, sizeof(struct can_frame)) < 0)
+		napi_throw_error(con->env, NULL, "Cannot write socket");
+	uv_timer_start(&con->hb_uvt, co_hb_timeout_cb, con->hb_wait_time, 0);
+
+	return g_napi_null;
+}
+
+//// SDO Functions /////////////////////////////////////////////////////////////
+napi_value co_sdo_download(napi_env env, napi_callback_info info) {
 	napi_status status;
 	size_t argc = 4;
 	napi_value argv[4], tmp;
@@ -381,7 +510,7 @@ napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
 	napi_valuetype vt;
 	co_t_node *con;
 	struct can_frame *frame;
-	struct co_s_sdo *s;
+	co_t_sdo *s;
 	co_t_sdo_queue_item *i;
 	uint8_t unused_bytes;
 
@@ -421,7 +550,7 @@ napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
 
 	/* Fill the CANopen data */
 	frame = &i->cf;
-	s = (struct co_s_sdo *) frame->data;
+	s = (co_t_sdo *) frame->data;
 	frame->can_id = 0x600+con->node_id;
 	unused_bytes = 4 - jslen;
 	s->header.bits.cs = CO_CCS_DOWNLOAD_INIT;
@@ -433,7 +562,7 @@ napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
 	s->subindex = subindex;
 	memcpy(s->data, jsdata, jslen);
 	memset(&s->data[jslen], 0, unused_bytes);
-	frame->can_dlc = sizeof(struct co_s_sdo);
+	frame->can_dlc = sizeof(co_t_sdo);
 
 	/* Expected command specifier */
 	i->expected_scs = CO_SCS_DOWNLOAD_INIT_RESPONSE;
@@ -445,7 +574,7 @@ napi_value wrapper_co_sdo_download(napi_env env, napi_callback_info info) {
 	return g_napi_null;
 }
 
-napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
+napi_value co_sdo_upload(napi_env env, napi_callback_info info) {
 	napi_status status;
 	size_t argc = 3;
 	napi_value argv[3], tmp;
@@ -453,7 +582,7 @@ napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
 	co_t_node *con;
 	uint32_t index, subindex;
 	struct can_frame *frame;
-	struct co_s_sdo *s;
+	co_t_sdo *s;
 	co_t_sdo_queue_item *i;
 
 	/* Get arguments */
@@ -487,7 +616,7 @@ napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
 
 	/* Fill the CANopen data */
 	frame = &i->cf;
-	s = (struct co_s_sdo *) frame->data;
+	s = (co_t_sdo *) frame->data;
 	frame->can_id = 0x600+con->node_id;
 	s->header.bits.cs = CO_CCS_UPLOAD_INIT;
 	s->header.bits.r = 0;
@@ -497,7 +626,7 @@ napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
 	s->index = index;
 	s->subindex = subindex;
 	memset(s->data, 0, sizeof(s->data));
-	frame->can_dlc = sizeof(struct co_s_sdo);
+	frame->can_dlc = sizeof(co_t_sdo);
 
 	/* Expected command specifier */
 	i->expected_scs = CO_SCS_UPLOAD_INIT_RESPONSE;
@@ -510,8 +639,7 @@ napi_value wrapper_co_sdo_upload(napi_env env, napi_callback_info info) {
 }
 
 //// PDO Functions /////////////////////////////////////////////////////////////
-
-napi_value wrapper_co_pdo_send(napi_env env, napi_callback_info info) {
+napi_value co_pdo_send(napi_env env, napi_callback_info info) {
 	napi_status status;
 	size_t argc = 2;
 	napi_value argv[2];
@@ -545,7 +673,7 @@ napi_value wrapper_co_pdo_send(napi_env env, napi_callback_info info) {
 	return g_napi_null;
 }
 
-napi_value wrapper_co_pdo_recv(napi_env env, napi_callback_info info) {
+napi_value co_pdo_recv(napi_env env, napi_callback_info info) {
 	napi_status status;
 	size_t argc = 1;
 	napi_value argv[1], tmp;
@@ -562,26 +690,27 @@ napi_value wrapper_co_pdo_recv(napi_env env, napi_callback_info info) {
 	napi_assert_other(env, vt != napi_function, "Invalid callback");
 	status = napi_create_string_utf8(env, "PDO Callback Context", NAPI_AUTO_LENGTH, &tmp);
 	napi_assert(env, status);
-	status = napi_async_init(env, NULL, tmp, &con->cb_pdo_ctx);
+	status = napi_async_init(env, NULL, tmp, &con->pdo_cb_ctx);
 	napi_assert(env, status);
-	status = napi_create_reference(env, argv[0], 1, &con->cb_pdo_ref);
+	status = napi_create_reference(env, argv[0], 1, &con->pdo_cb_ref);
 	napi_assert(env, status);
 
 	return g_napi_null;
 }
 
 //// Create Node Function //////////////////////////////////////////////////////
-
-void wrapper_co_delete_node(napi_env env, void* finalize_data, void* finalize_hint){
+void co_delete_node(napi_env env, void* finalize_data, void* finalize_hint){
 	co_t_node *con = (co_t_node *)finalize_data;
-	uv_poll_stop(&con->sdo_uvp);
-	uv_close((uv_handle_t *)&con->sdo_uvp, NULL);
+	uv_poll_stop(&con->can_uvp);
+	uv_close((uv_handle_t *)&con->can_uvp, NULL);
 	uv_timer_stop(&con->sdo_uvt);
 	uv_close((uv_handle_t *)&con->sdo_uvt, NULL);
+	uv_timer_stop(&con->hb_uvt);
+	uv_close((uv_handle_t *)&con->hb_uvt, NULL);
 	free(con);
 }
 
-napi_value wrapper_co_create_node(napi_env env, napi_callback_info info) {
+napi_value co_create_node(napi_env env, napi_callback_info info) {
 	napi_status status;
 	uv_loop_t *loop;
 
@@ -617,37 +746,43 @@ napi_value wrapper_co_create_node(napi_env env, napi_callback_info info) {
 
 	/* ._co_t_node hold owner private data */
 	con = (co_t_node *)malloc(sizeof(co_t_node));
-	status = napi_create_external(env, con, wrapper_co_delete_node, NULL, &tmp);
+	status = napi_create_external(env, con, co_delete_node, NULL, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, object, "_co_t_node", tmp);
 	napi_assert(env, status);
 
 	/* .nmt_send Function*/
-	status = napi_create_function(env, NULL, 0, wrapper_co_nmt_send, (void *)con, &tmp);
+	status = napi_create_function(env, NULL, 0, co_nmt_send, (void *)con, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, object, "nmt_send", tmp);
 	napi_assert(env, status);
 
+	/* .heartbeat Function*/
+	status = napi_create_function(env, NULL, 0, co_heartbeat, (void *)con, &tmp);
+	napi_assert(env, status);
+	status = napi_set_named_property(env, object, "heartbeat", tmp);
+	napi_assert(env, status);
+
 	/* .sdo_download Function*/
-	status = napi_create_function(env, NULL, 0, wrapper_co_sdo_download, (void *)con, &tmp);
+	status = napi_create_function(env, NULL, 0, co_sdo_download, (void *)con, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, object, "sdo_download", tmp);
 	napi_assert(env, status);
 
 	/* .sdo_upload Function*/
-	status = napi_create_function(env, NULL, 0, wrapper_co_sdo_upload, (void *)con, &tmp);
+	status = napi_create_function(env, NULL, 0, co_sdo_upload, (void *)con, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, object, "sdo_upload", tmp);
 	napi_assert(env, status);
 
 	/* .pdo_send Function*/
-	status = napi_create_function(env, NULL, 0, wrapper_co_pdo_send, (void *)con, &tmp);
+	status = napi_create_function(env, NULL, 0, co_pdo_send, (void *)con, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, object, "pdo_send", tmp);
 	napi_assert(env, status);
 
 	/* .pdo_recv Function*/
-	status = napi_create_function(env, NULL, 0, wrapper_co_pdo_recv, (void *)con, &tmp);
+	status = napi_create_function(env, NULL, 0, co_pdo_recv, (void *)con, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, object, "pdo_recv", tmp);
 	napi_assert(env, status);
@@ -709,21 +844,33 @@ napi_value wrapper_co_create_node(napi_env env, napi_callback_info info) {
 	/* Handle data for SDO and PDO */
 	status = napi_get_uv_event_loop(env, &loop);
 	napi_assert(env, status);
-	uv_poll_init(loop, &con->sdo_uvp, con->canfd);
-	con->sdo_uvp.data = con;
-	uv_poll_start(&con->sdo_uvp, UV_READABLE, co_recv_cb);
+	uv_poll_init(loop, &con->can_uvp, con->canfd);
+	con->can_uvp.data = con;
+	uv_poll_start(&con->can_uvp, UV_READABLE, co_can_recv_cb);
 
 	/* Handle timeout for SDO */
 	uv_timer_init(loop, &con->sdo_uvt);
 	con->sdo_uvt.data = con;
-	con->wait_time = 500; /* Set to 500 ms */
+	con->sdo_wait_time = 500; /* Set to 500 ms */
 
 	/* No callback for PDO yet */
-	con->cb_pdo_ref = NULL;
+	con->pdo_cb_ref = NULL;
+	
+	/* Handle timeout for HB */
+	uv_timer_init(loop, &con->hb_uvt);
+	con->hb_uvt.data = con;
+	con->hb_wait_time = 20; /* Set to 20 ms */
+
+	/* No callback for HB yet */
+	con->hb_cb_ref = NULL;
+
+	/* Something else than 0 or 1... */
+	con->hb_last_toggle_bit = 255;
 
 	return object;
 }
 
+//// Init Module Function //////////////////////////////////////////////////////
 napi_value Init(napi_env env, napi_value exports) {
 	napi_status status;
 	napi_value tmp;
@@ -734,12 +881,12 @@ napi_value Init(napi_env env, napi_value exports) {
 		return exports;
 	}
 
-	status = napi_create_function(env, NULL, 0, wrapper_co_create_node, NULL, &tmp);
+	status = napi_create_function(env, NULL, 0, co_create_node, NULL, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, exports, "create_node", tmp);
 	napi_assert(env, status);
 
-/* -- Constants are set in Javascript now --
+	/* Constants */
 	status = napi_create_uint32(env, CO_NMT_OPERATIONAL, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, exports, "NMT_OPERATIONAL", tmp);
@@ -764,7 +911,27 @@ napi_value Init(napi_env env, napi_value exports) {
 	napi_assert(env, status);
 	status = napi_set_named_property(env, exports, "NMT_RESET_COMMUNICATION", tmp);
 	napi_assert(env, status);
-*/
+
+	status = napi_create_uint32(env, CO_HB_BOOT, &tmp);
+	napi_assert(env, status);
+	status = napi_set_named_property(env, exports, "HB_BOOT", tmp);
+	napi_assert(env, status);
+
+	status = napi_create_uint32(env, CO_HB_STOPPED, &tmp);
+	napi_assert(env, status);
+	status = napi_set_named_property(env, exports, "HB_STOPPED", tmp);
+	napi_assert(env, status);
+
+	status = napi_create_uint32(env, CO_HB_OPERATIONAL, &tmp);
+	napi_assert(env, status);
+	status = napi_set_named_property(env, exports, "HB_OPERATIONAL", tmp);
+	napi_assert(env, status);
+
+	status = napi_create_uint32(env, CO_HB_PRE_OPERATIONAL, &tmp);
+	napi_assert(env, status);
+	status = napi_set_named_property(env, exports, "HB_PRE_OPERATIONAL", tmp);
+	napi_assert(env, status);
+
 	return exports;
 }
 

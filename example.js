@@ -112,3 +112,11 @@ node.sdo_upload_uint8(0x6200, 0).then(u8 => {
 	console.log("Error reading the number of outputs: "+err);
 });
 
+node.heartbeat_str(function(state){
+	console.log("Node state:", state);
+});
+
+setInterval(function() {
+	node.heartbeat();
+}, 1000);
+

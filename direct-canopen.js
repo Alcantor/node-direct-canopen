@@ -73,17 +73,38 @@ function create_node(device, node_id){
 					if(res instanceof Error) reject(res);
 					else resolve(new Uint32Array(res)[0]);
 				});
-			});;
+			});
+		}
+	obj.heartbeat_str = function (cb){
+			obj.heartbeat(function(state){
+				if(state instanceof Error) cb(state);
+				else switch(state){
+					case dco.HB_BOOT:
+						cb("BOOT");
+						break;
+					case dco.HB_STOPPED:
+						cb("STOPPED");
+						break;
+					case dco.HB_OPERATIONAL:
+						cb("OPERATIONAL");
+						break;
+					case dco.HB_PRE_OPERATIONAL:
+						cb("PRE_OPERATIONAL");
+						break;
+					default:
+						cb(state);
+				}
+			});
 		}
 	return obj;
 }
 
 module.exports = {
 	"create_node": create_node,
-	"NMT_OPERATIONAL": 0x01,
-	"NMT_STOP": 0x02,
-	"NMT_PRE_OPERATIONAL": 0x80,
-	"NMT_RESET_NODE": 0x81,
-	"NMT_RESET_COMMUNICATION": 0x82
+	"NMT_OPERATIONAL": dco.NMT_OPERATIONAL,
+	"NMT_STOP": dco.NMT_STOP,
+	"NMT_PRE_OPERATIONAL": dco.NMT_PRE_OPERATIONAL,
+	"NMT_RESET_NODE": dco.NMT_RESET_NODE,
+	"NMT_RESET_COMMUNICATION": dco.NMT_RESET_COMMUNICATION
 };
 
