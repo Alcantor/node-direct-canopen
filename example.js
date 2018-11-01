@@ -116,7 +116,5 @@ node.heartbeat_str(function(state){
 	console.log("Node state:", state);
 });
 
-setInterval(function() {
-	node.heartbeat();
-}, 1000);
+setInterval(node.heartbeat, 1000);
 

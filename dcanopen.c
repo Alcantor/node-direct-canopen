@@ -294,7 +294,7 @@ void co_sdo_timeout_cb(uv_timer_t* handle) {
 	napi_status status;
 	napi_value argv[1], global, cb;
 
-	i = co_sdo_queue_pop(&con->sdo_queue);
+	i = co_sdo_queue_get(&con->sdo_queue);
 	if(i == NULL) return;
 	napi_open_handle_scope(con->env, &nhs);
 	co_sdo_emit(con);
@@ -318,6 +318,11 @@ void co_sdo_timeout_cb(uv_timer_t* handle) {
 	napi_assert_async(con->env, status, nhs);
 
 	napi_close_handle_scope(con->env, nhs);
+
+	/* Maybe in the javascript callback, there is an indirect call to
+	   co_sdo_queue_push (through sdo_upload or sdo_download functions).
+	   That's why we cannot pop the queue before the callback is finished.*/
+	co_sdo_queue_pop(&con->sdo_queue);
 }
 
 void co_sdo_emit(co_t_node *con) {
@@ -341,11 +346,10 @@ void co_sdo_recv_cb(co_t_node *con, co_t_sdo *s) {
 	size_t jslen;
 
 	/* We receive a SDO: stop timer and send the next SDO */
-	i = co_sdo_queue_pop(&con->sdo_queue);
+	i = co_sdo_queue_get(&con->sdo_queue);
 	if(i == NULL) return;
 	uv_timer_stop(&con->sdo_uvt);	
 	napi_open_handle_scope(con->env, &nhs);
-	co_sdo_emit(con);
 
 	/* Check the type of SDO */
 	if(s->header.bits.cs != i->expected_scs) {
@@ -381,6 +385,12 @@ void co_sdo_recv_cb(co_t_node *con, co_t_sdo *s) {
 	napi_assert_async(con->env, status, nhs);
 
 	napi_close_handle_scope(con->env, nhs);
+
+	/* Maybe in the javascript callback, there is an indirect call to
+	   co_sdo_queue_push (through sdo_upload or sdo_download functions).
+	   That's why we cannot pop the queue before the callback is finished.*/
+	co_sdo_queue_pop(&con->sdo_queue);
+	co_sdo_emit(con);
 }
 
 void co_pdo_recv_cb(co_t_node *con, co_t_pdo_id id, co_t_pdo *p, size_t len) {
