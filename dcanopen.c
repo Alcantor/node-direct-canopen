@@ -737,12 +737,10 @@ napi_value co_pdo_recv(napi_env env, napi_callback_info info) {
 //// Create Node Function //////////////////////////////////////////////////////
 void co_delete_node(napi_env env, void* finalize_data, void* finalize_hint){
 	co_t_node *con = (co_t_node *)finalize_data;
-	uv_poll_stop(&con->can_uvp);
 	uv_close((uv_handle_t *)&con->can_uvp, NULL);
-	uv_timer_stop(&con->hb_uvt);
 	uv_close((uv_handle_t *)&con->hb_uvt, NULL);
-	uv_timer_stop(&con->sdo_uvt);
 	uv_close((uv_handle_t *)&con->sdo_uvt, NULL);
+	close(con->canfd);
 	if(con->hb_cb_ref != NULL){
 		napi_async_destroy(con->env, con->hb_cb_ctx);
 		napi_delete_reference(con->env, con->hb_cb_ref);
@@ -752,6 +750,34 @@ void co_delete_node(napi_env env, void* finalize_data, void* finalize_hint){
 		napi_delete_reference(con->env, con->pdo_cb_ref);
 	}
 	free(con);
+}
+
+napi_value co_stop(napi_env env, napi_callback_info info) {
+	napi_status status;
+	size_t argc = 0;
+	napi_value argv[0];
+	co_t_node *con;
+
+	/* Get arguments */
+	status = napi_get_cb_info(env, info, &argc, argv, NULL, (void **)&con);
+	napi_assert(env, status);
+
+	/* Stop the callback */
+	uv_poll_stop(&con->can_uvp);
+	uv_timer_stop(&con->hb_uvt);
+	uv_timer_stop(&con->sdo_uvt);
+	if(con->hb_cb_ref != NULL){
+		napi_async_destroy(con->env, con->hb_cb_ctx);
+		napi_delete_reference(con->env, con->hb_cb_ref);
+		con->hb_cb_ref = NULL;
+	}
+	if(con->pdo_cb_ref != NULL){
+		napi_async_destroy(con->env, con->pdo_cb_ctx);
+		napi_delete_reference(con->env, con->pdo_cb_ref);
+		con->pdo_cb_ref = NULL;
+	}
+
+	return g_napi_null;
 }
 
 napi_value co_create_node(napi_env env, napi_callback_info info) {
@@ -829,6 +855,12 @@ napi_value co_create_node(napi_env env, napi_callback_info info) {
 	status = napi_create_function(env, NULL, 0, co_pdo_recv, (void *)con, &tmp);
 	napi_assert(env, status);
 	status = napi_set_named_property(env, object, "pdo_recv", tmp);
+	napi_assert(env, status);
+
+	/* .stop Function*/
+	status = napi_create_function(env, NULL, 0, co_stop, (void *)con, &tmp);
+	napi_assert(env, status);
+	status = napi_set_named_property(env, object, "stop", tmp);
 	napi_assert(env, status);
 
 	/* .node_id Value */
