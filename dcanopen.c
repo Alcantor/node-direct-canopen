@@ -213,6 +213,13 @@ typedef struct {
 	int canfd;
 	uv_poll_t can_uvp;
 
+	/* Heartbeat Stuff */
+	napi_ref hb_cb_ref;
+	napi_async_context hb_cb_ctx;
+	uv_timer_t hb_uvt;
+	unsigned int hb_wait_time;
+	uint8_t hb_last_toggle_bit;
+
 	/* SDO Stuff */
 	co_t_sdo_queue sdo_queue;
 	uv_timer_t sdo_uvt;
@@ -221,16 +228,32 @@ typedef struct {
 	/* PDO Stuff */
 	napi_ref pdo_cb_ref;
 	napi_async_context pdo_cb_ctx;
-
-	/* Heartbeat Stuff */
-	napi_ref hb_cb_ref;
-	napi_async_context hb_cb_ctx;
-	uv_timer_t hb_uvt;
-	unsigned int hb_wait_time;
-	uint8_t hb_last_toggle_bit;
 } co_t_node;
 
 //// uvlib callback ////////////////////////////////////////////////////////////
+void co_stop_all_cb(co_t_node *con){
+	co_t_sdo_queue_item *i;
+	/* Stop heartbeat */
+	uv_timer_stop(&con->hb_uvt);
+	if(con->hb_cb_ref != NULL){
+		napi_async_destroy(con->env, con->hb_cb_ctx);
+		napi_delete_reference(con->env, con->hb_cb_ref);
+		con->hb_cb_ref = NULL;
+	}
+	/* Stop SDO */
+	uv_timer_stop(&con->sdo_uvt);
+	while((i = co_sdo_queue_pop(&con->sdo_queue)) != NULL){
+		napi_async_destroy(con->env, i->cb_ctx);
+		napi_delete_reference(con->env, i->cb_ref);
+	}
+	/* Stop PDO */
+	if(con->pdo_cb_ref != NULL){
+		napi_async_destroy(con->env, con->pdo_cb_ctx);
+		napi_delete_reference(con->env, con->pdo_cb_ref);
+		con->pdo_cb_ref = NULL;
+	}
+}
+
 void co_hb_timeout_cb(uv_timer_t* handle) {
 	co_t_node *con = (co_t_node *)handle->data;
 	napi_handle_scope nhs;
@@ -737,18 +760,12 @@ napi_value co_pdo_recv(napi_env env, napi_callback_info info) {
 //// Create Node Function //////////////////////////////////////////////////////
 void co_delete_node(napi_env env, void* finalize_data, void* finalize_hint){
 	co_t_node *con = (co_t_node *)finalize_data;
+	uv_poll_stop(&con->can_uvp);
+	co_stop_all_cb(con);
 	uv_close((uv_handle_t *)&con->can_uvp, NULL);
 	uv_close((uv_handle_t *)&con->hb_uvt, NULL);
 	uv_close((uv_handle_t *)&con->sdo_uvt, NULL);
 	close(con->canfd);
-	if(con->hb_cb_ref != NULL){
-		napi_async_destroy(con->env, con->hb_cb_ctx);
-		napi_delete_reference(con->env, con->hb_cb_ref);
-	}
-	if(con->pdo_cb_ref != NULL){
-		napi_async_destroy(con->env, con->pdo_cb_ctx);
-		napi_delete_reference(con->env, con->pdo_cb_ref);
-	}
 	free(con);
 }
 
@@ -763,19 +780,7 @@ napi_value co_stop(napi_env env, napi_callback_info info) {
 	napi_assert(env, status);
 
 	/* Stop the callback */
-	uv_poll_stop(&con->can_uvp);
-	uv_timer_stop(&con->hb_uvt);
-	uv_timer_stop(&con->sdo_uvt);
-	if(con->hb_cb_ref != NULL){
-		napi_async_destroy(con->env, con->hb_cb_ctx);
-		napi_delete_reference(con->env, con->hb_cb_ref);
-		con->hb_cb_ref = NULL;
-	}
-	if(con->pdo_cb_ref != NULL){
-		napi_async_destroy(con->env, con->pdo_cb_ctx);
-		napi_delete_reference(con->env, con->pdo_cb_ref);
-		con->pdo_cb_ref = NULL;
-	}
+	co_stop_all_cb(con);
 
 	return g_napi_null;
 }
