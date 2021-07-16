@@ -153,7 +153,7 @@ typedef struct {
 
 //// SDO Queue /////////////////////////////////////////////////////////////////
 
-#define QSIZE 64
+#define QSIZE 128
 
 typedef struct {
 	napi_ref cb_ref;
